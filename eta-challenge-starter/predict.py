@@ -1,6 +1,5 @@
 """predict.py — Gobblecube grader interface.
 The grader calls predict() once per held-out request.
-Signature is FIXED. Internals are yours.
 Constraint: inference ≤ 200ms per request.
 """
 from __future__ import annotations
@@ -10,10 +9,11 @@ from math import radians, sin, cos, sqrt, atan2
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore", message=".*feature names.*", category=UserWarning)
 
 _MODEL_PATH = Path(__file__).parent / "model.pkl"
-with open(_MODEL_PATH, "rb") as _f:
-    _P = pickle.load(_f)
+with open(_MODEL_PATH, "rb") as _f: _P = pickle.load(_f)
 
 _MODEL      = _P["model"]
 _PAIR_DATA  = _P["pair_lookup"]
@@ -24,6 +24,7 @@ _ZDH        = _P["zdh_lookup"]
 _ZMH        = _P["zmh_lookup"]
 _GMEAN      = _P["global_mean"]
 _CENT       = _P["centroids"].set_index("zone_id")
+_FEAT_NAMES = _P["feat_names"]
 
 def _hav(lat1, lon1, lat2, lon2):
     R = 6371.0
@@ -50,41 +51,20 @@ def predict(request: dict) -> float:
     zdh = _ZDH.get((pu, do, iw, h), _GMEAN)
     zmh = _ZMH.get((pu, do, mon, hb), _GMEAN)
 
-    pz = min(max(pu, 1), 265)
-    dz = min(max(do, 1), 265)
-    pc_row = _CENT.loc[pz]
-    dc_row = _CENT.loc[dz]
-    dk  = _hav(pc_row["lat"], pc_row["lon"], dc_row["lat"], dc_row["lon"])
+    pz, dz = min(max(pu, 1), 265), min(max(do, 1), 265)
+    pc_row, dc_row = _CENT.loc[pz], _CENT.loc[dz]
+    dk = _hav(pc_row["lat"], pc_row["lon"], dc_row["lat"], dc_row["lon"])
 
-    x = pd.DataFrame([{
-        "pickup_zone":     pu,
-        "dropoff_zone":    do,
-        "hour":            h,
-        "dow":             dow,
-        "month":           mon,
-        "is_weekend":      iw,
-        "hour_bin":        hb,
-        "hour_sin":        np.sin(2*np.pi*h/24),
-        "hour_cos":        np.cos(2*np.pi*h/24),
-        "dow_sin":         np.sin(2*np.pi*dow/7),
-        "dow_cos":         np.cos(2*np.pi*dow/7),
-        "month_sin":       np.sin(2*np.pi*mon/12),
-        "month_cos":       np.cos(2*np.pi*mon/12),
-        "is_morning_rush": int(7<=h<=9 and not iw),
-        "is_evening_rush": int(16<=h<=19 and not iw),
-        "is_night":        int(h>=22 or h<=5),
-        "pair_mean":       pm,
-        "pair_count":      p_cnt,
-        "zh_mean":         zh,
-        "zdh_mean":        zdh,
-        "zmh_mean":        zmh,
-        "dist_km":         dk,
-        "pu_lat":          pc_row["lat"],
-        "pu_lon":          pc_row["lon"],
-        "do_lat":          dc_row["lat"],
-        "do_lon":          dc_row["lon"],
-        "is_same_zone":    int(pu == do),
-        "passenger_count": pc,
-    }])
+    # Build feature array in EXACT column order from train.py
+    x = np.array([[
+        pu, do, h, dow, mon, iw, hb,
+        np.sin(2*np.pi*h/24), np.cos(2*np.pi*h/24),
+        np.sin(2*np.pi*dow/7), np.cos(2*np.pi*dow/7),
+        np.sin(2*np.pi*mon/12), np.cos(2*np.pi*mon/12),
+        int(7<=h<=9 and not iw), int(16<=h<=19 and not iw), int(h>=22 or h<=5),
+        pm, p_cnt, zh, zdh, zmh,
+        dk, pc_row["lat"], pc_row["lon"], dc_row["lat"], dc_row["lon"],
+        int(pu == do), pc
+    ]], dtype=np.float64)
 
     return float(_MODEL.predict(x)[0])
