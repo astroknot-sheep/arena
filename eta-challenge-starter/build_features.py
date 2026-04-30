@@ -20,9 +20,7 @@ def build_zone_pair_lookup(train: pd.DataFrame) -> dict:
         .agg(["mean", "median", "count"])
         .reset_index()
     )
-    pair_mean = {}
-    pair_median = {}
-    pair_count = {}
+    pair_mean, pair_median, pair_count = {}, {}, {}
     for row in grp.itertuples():
         key = (row.pickup_zone, row.dropoff_zone)
         pair_mean[key] = row.mean
@@ -42,10 +40,7 @@ def build_zone_hour_lookup(train: pd.DataFrame) -> dict:
     df = train.copy()
     df["hour_bin"] = (ts.dt.hour // 4).astype("int8")
     grp = df.groupby(["pickup_zone", "dropoff_zone", "hour_bin"])["duration_seconds"].mean().reset_index()
-    lookup = {}
-    for row in grp.itertuples():
-        lookup[(row.pickup_zone, row.dropoff_zone, row.hour_bin)] = row.duration_seconds
-    return lookup
+    return {(r.pickup_zone, r.dropoff_zone, r.hour_bin): r.duration_seconds for r in grp.itertuples()}
 
 def build_zone_dow_hour_lookup(train: pd.DataFrame) -> dict:
     """Fine-grained: (pu_zone, do_zone, is_weekend, hour) → mean duration."""
@@ -54,10 +49,7 @@ def build_zone_dow_hour_lookup(train: pd.DataFrame) -> dict:
     df["hour"] = ts.dt.hour.astype("int8")
     df["is_weekend"] = (ts.dt.dayofweek >= 5).astype("int8")
     grp = df.groupby(["pickup_zone", "dropoff_zone", "is_weekend", "hour"])["duration_seconds"].mean().reset_index()
-    lookup = {}
-    for row in grp.itertuples():
-        lookup[(row.pickup_zone, row.dropoff_zone, row.is_weekend, row.hour)] = row.duration_seconds
-    return lookup
+    return {(r.pickup_zone, r.dropoff_zone, r.is_weekend, r.hour): r.duration_seconds for r in grp.itertuples()}
 
 def build_zone_month_hour_lookup(train: pd.DataFrame) -> dict:
     """(pu, do, month, hour_bin) → mean — captures seasonal variation per route."""
@@ -95,26 +87,26 @@ def build_zone_centroids() -> pd.DataFrame:
     return centroids
 
 if __name__ == "__main__":
-    print("Loading full train data (~37M rows, may take 30s)...")
+    print("Loading full train data (~37M rows)...")
     train = pd.read_parquet(DATA_DIR / "train.parquet")
     print(f"  {len(train):,} rows")
-
+    
     print("Building zone-pair lookup...")
     pair_lookup = build_zone_pair_lookup(train)
     print(f"  {len(pair_lookup['pair_mean']):,} zone pairs")
-
+    
     print("Building zone-hour-bin lookup...")
     zh_lookup = build_zone_hour_lookup(train)
-
+    
     print("Building zone-weekend-hour lookup...")
     zdh_lookup = build_zone_dow_hour_lookup(train)
-
+    
     print("Building zone-month-hour-bin lookup...")
     zmh_lookup = build_zone_month_hour_lookup(train)
-
+    
     print("Building zone centroids...")
     centroids = build_zone_centroids()
-
+    
     lookups = {
         "pair_lookup": pair_lookup,
         "zh_lookup": zh_lookup,
